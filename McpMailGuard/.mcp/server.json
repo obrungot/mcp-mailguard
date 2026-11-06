@@ -1,0 +1,35 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "description": "MCP server providing read-only email and calendar access (Microsoft Graph / Outlook).",
+  "name": "io.github.obrungot/mcp-mailguard",
+  "version": "0.1.0-beta",
+  "packages": [
+    {
+      "registryType": "nuget",
+      "identifier": "McpMailGuard",
+      "version": "0.1.0-beta",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [],
+      "environmentVariables": [
+        {
+          "name": "Graph__ClientId",
+          "value": "${GRAPH_CLIENT_ID}"
+        },
+        {
+          "name": "Graph__TenantId",
+          "value": "${GRAPH_TENANT_ID}"
+        },
+        {
+          "name": "Graph__ClientSecret",
+          "value": "${GRAPH_CLIENT_SECRET}"
+        }
+      ]
+    }
+  ],
+  "repository": {
+    "url": "https://github.com/obrungot/mcp-mailguard",
+    "source": "github"
+  }
+}

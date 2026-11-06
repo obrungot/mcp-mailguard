@@ -1,0 +1,23 @@
+# Build results
+bin/
+obj/
+publish/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# Secrets and local config
+.env
+appsettings.Development.json
+appsettings.Local.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test artifacts
+*.log
+mcp-stdout.jsonl
+mcp-stderr.log

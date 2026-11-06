@@ -1,0 +1,23 @@
+# Build output
+**/bin/
+**/obj/
+**/publish/
+
+# IDE
+.vs/
+.vscode/
+*.user
+
+# Source control / meta
+.git/
+.gitignore
+.github/
+
+# Local secrets
+.env
+docker-compose.override.yml
+
+# Docs / tooling not needed in image
+*.md
+!README.md
+*.slnx

@@ -1,0 +1,11 @@
+# Normalize line endings: store LF in the repository and check out LF everywhere,
+# so the Dockerfile and shell scripts behave identically on Windows and Linux.
+* text=auto eol=lf
+
+# Do not normalize binary assets.
+*.png binary
+*.jpg binary
+*.gif binary
+*.ico binary
+*.dll binary
+*.exe binary

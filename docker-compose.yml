@@ -1,0 +1,31 @@
+version: "3.9"
+
+services:
+  mcp-mailguard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: mcp-mailguard:latest
+    container_name: mcp-mailguard
+    # Read-only filesystem for defense in depth.
+    read_only: true
+    # Temporary writable locations for the app and OS.
+    tmpfs:
+      - /tmp:rw,noexec,nosuid
+      - /var/tmp:rw,noexec,nosuid
+    # Drop all capabilities for defense in depth.
+    cap_drop:
+      - ALL
+    # No new privileges.
+    security_opt:
+      - no-new-privileges:true
+    # Environment variables are injected at runtime via .env.
+    environment:
+      - DOTNET_ENVIRONMENT=${DOTNET_ENVIRONMENT:-Production}
+      - Graph__ClientId=${GRAPH_CLIENT_ID}
+      - Graph__TenantId=${GRAPH_TENANT_ID}
+      - Graph__ClientSecret=${GRAPH_CLIENT_SECRET}
+    # Stdio transport: the container is long-lived and communicates over stdin/stdout.
+    # Use `docker run -i` or attach to the container to interact.
+    stdin_open: true
+    tty: true
