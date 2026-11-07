@@ -85,6 +85,10 @@ export Graph__TenantId="consumers"     # "common" also works for mixed account t
 # export Graph__UserId="user@contoso.com"
 ```
 
+> In a delegated mode, `Graph:TenantId` is **optional** — if omitted, the server auto-selects the
+> right endpoint (it tries `consumers`, then `common`, then `organizations`), so a personal-only
+> app registration works with no extra configuration.
+
 Or copy `.env.example` to `.env` for Docker usage.
 
 ### 4. Run it

@@ -19,10 +19,15 @@ internal static class GraphErrors
         var msal = Find<MsalServiceException>(ex);
         if (msal is not null)
         {
+            var hint = msal.Message.Contains("AADSTS9002346", StringComparison.OrdinalIgnoreCase) ||
+                       msal.Message.Contains("Microsoft Account users only", StringComparison.OrdinalIgnoreCase)
+                ? "This app registration is personal-accounts-only and must use the 'consumers' endpoint. " +
+                  "Set Graph:TenantId=consumers (or leave TenantId empty to let the server auto-select it)."
+                : "Check Graph:AuthMode, ClientId, TenantId, ClientSecret, and that the required " +
+                  "delegated/application permissions are consented on the app registration.";
+
             return new InvalidOperationException(
-                $"Microsoft Graph authentication failed ({msal.ErrorCode}): {msal.Message} " +
-                "Check Graph:AuthMode, ClientId, TenantId, ClientSecret, and that the required " +
-                "delegated/application permissions are consented on the app registration.", msal);
+                $"Microsoft Graph authentication failed ({msal.ErrorCode}): {msal.Message} {hint}", msal);
         }
 
         var uiRequired = Find<MsalUiRequiredException>(ex);

@@ -97,7 +97,7 @@ Environment variables (`__` maps to the `Graph:` config section):
 | Variable | Description |
 | --- | --- |
 | `Graph__ClientId` | Entra application (client) ID. |
-| `Graph__TenantId` | Tenant GUID, or `consumers` / `common`. |
+| `Graph__TenantId` | Tenant GUID, `consumers`, `common`, or `organizations`. Optional in delegated modes (auto-selected if empty). |
 | `Graph__ClientSecret` | Client secret (app-only mode only). |
 | `Graph__AuthMode` | `DeviceCode` \| `InteractiveBrowser` \| `ClientCredentials` (empty = infer). |
 | `Graph__UserId` | Mailbox to read in app-only mode. |

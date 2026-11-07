@@ -46,18 +46,43 @@ public static class GraphClientBuilder
 
     private static GraphServiceClient CreateDelegated(GraphAuthConfig config, bool useBrowser)
     {
-        // Personal Microsoft accounts use the "consumers" tenant; "common" covers both
-        // personal and work/school accounts. Respect an explicit TenantId if provided.
-        var tenantId = string.IsNullOrWhiteSpace(config.TenantId) ? "common" : config.TenantId;
         var scopes = config.Scopes is { Length: > 0 }
             ? config.Scopes
             : new[] { "User.Read", "Mail.Read", "Calendars.Read" };
 
-        TokenCredential credential = useBrowser
-            ? CreateBrowserCredential(config, tenantId)
-            : CreateDeviceCodeCredential(config, tenantId);
+        var candidates = BuildTenantCandidates(config.TenantId)
+            .Select(tenant => (
+                Tenant: tenant,
+                Credential: (TokenCredential)(useBrowser
+                    ? CreateBrowserCredential(config, tenant)
+                    : CreateDeviceCodeCredential(config, tenant))))
+            .ToList();
+
+        TokenCredential credential = candidates.Count == 1
+            ? candidates[0].Credential
+            : new TenantFallbackCredential(candidates,
+                message => Console.Error.WriteLine($"[McpMailGuard] {message}"));
 
         return new GraphServiceClient(credential, scopes);
+    }
+
+    /// <summary>
+    /// Ordered list of tenant endpoints to try. An explicitly configured tenant is tried first,
+    /// then the well-known aliases. "consumers" leads the defaults so personal-account
+    /// registrations (the primary use case) succeed without extra configuration; "common" and
+    /// "organizations" cover work/school accounts.
+    /// </summary>
+    private static IReadOnlyList<string> BuildTenantCandidates(string? configuredTenant)
+    {
+        var tenants = new List<string>();
+        if (!string.IsNullOrWhiteSpace(configuredTenant))
+            tenants.Add(configuredTenant.Trim());
+
+        foreach (var fallback in new[] { "consumers", "common", "organizations" })
+            if (!tenants.Contains(fallback, StringComparer.OrdinalIgnoreCase))
+                tenants.Add(fallback);
+
+        return tenants;
     }
 
     private static DeviceCodeCredential CreateDeviceCodeCredential(GraphAuthConfig config, string tenantId)
