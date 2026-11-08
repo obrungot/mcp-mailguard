@@ -3,57 +3,61 @@
 
 using System.ComponentModel;
 using McpMailGuard.Abstractions;
+using McpMailGuard.Accounts;
 using McpMailGuard.Models;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
 namespace McpMailGuard.Tools;
 
 /// <summary>
-/// Mail-related MCP tools for agent interaction.
+/// Read-only mail tools.
 /// </summary>
-public class MailTools
+[McpServerToolType]
+public sealed class MailTools
 {
-    private readonly IEmailProvider _emailProvider;
-    private readonly ILogger<MailTools> _logger;
+    private const string AccountDescription =
+        "Account name from list_accounts. May be omitted when only one account is configured.";
 
-    public MailTools(IEmailProvider emailProvider, ILogger<MailTools> logger)
-    {
-        _emailProvider = emailProvider;
-        _logger = logger;
-    }
+    private const string FolderDescription =
+        "Folder: inbox, sent, drafts, archive, deleted, junk, or all.";
 
-    [McpServerTool]
-    [Description("Gets a list of the most recent emails in the mailbox, newest first.")]
-    public async Task<IReadOnlyList<EmailMessage>> GetRecentEmailsAsync(
-        [Description("Maximum number of emails to return")] int maxResults = 20,
-        [Description("Optional folder to read from (e.g. 'inbox', 'sent'); null for all folders")] string? folder = "inbox",
-        [Description("Optional full-text search query")] string? searchQuery = null,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Fetching recent emails (max={Max}, folder={Folder}, query={Query})",
-            maxResults, folder, searchQuery);
-        return await _emailProvider.ListMessagesAsync(maxResults, folder, searchQuery, cancellationToken);
-    }
+    private readonly AccountRegistry _accounts;
 
-    [McpServerTool]
-    [Description("Searches emails for a text query and returns the matches, newest first.")]
-    public async Task<IReadOnlyList<EmailMessage>> SearchEmailsAsync(
-        [Description("Search query text")] string query,
-        [Description("Maximum number of emails to return")] int maxResults = 20,
-        CancellationToken cancellationToken = default)
-    {
-        _logger.LogInformation("Searching emails for query '{Query}' (max={Max})", query, maxResults);
-        return await _emailProvider.SearchAsync(query, maxResults, cancellationToken);
-    }
+    public MailTools(AccountRegistry accounts) => _accounts = accounts;
 
-    [McpServerTool]
-    [Description("Gets the full content of a single email by its id.")]
-    public async Task<EmailMessage?> GetEmailAsync(
-        [Description("The email id returned by GetRecentEmails or SearchEmails")] string id,
-        CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "get_recent_emails", ReadOnly = true, OpenWorld = false)]
+    [Description("Lists the most recent emails in a folder, newest first. Returns a short preview of each body; use get_email for the full text.")]
+    public Task<IReadOnlyList<EmailMessage>> GetRecentEmailsAsync(
+        [Description(FolderDescription)] string folder = MailFolders.Inbox,
+        [Description("Maximum number of emails to return (1-50).")] int maxResults = 20,
+        [Description(AccountDescription)] string? account = null,
+        CancellationToken cancellationToken = default) =>
+        ToolGuard.RunAsync(() => Mail(account)
+            .ListMessagesAsync(folder, ToolGuard.ClampResults(maxResults), cancellationToken));
+
+    [McpServerTool(Name = "search_emails", ReadOnly = true, OpenWorld = false)]
+    [Description("Full-text search of emails (subject, body, sender, recipients). Returns a short preview of each match; use get_email for the full text.")]
+    public Task<IReadOnlyList<EmailMessage>> SearchEmailsAsync(
+        [Description("Words to search for.")] string query,
+        [Description(FolderDescription + " Defaults to all.")] string folder = MailFolders.All,
+        [Description("Maximum number of emails to return (1-50).")] int maxResults = 20,
+        [Description(AccountDescription)] string? account = null,
+        CancellationToken cancellationToken = default) =>
+        ToolGuard.RunAsync(() => Mail(account)
+            .SearchAsync(query, folder, ToolGuard.ClampResults(maxResults), cancellationToken));
+
+    [McpServerTool(Name = "get_email", ReadOnly = true, OpenWorld = false)]
+    [Description("Gets one email with its full plain-text body. Very long bodies are truncated.")]
+    public Task<EmailMessage?> GetEmailAsync(
+        [Description("Email id from get_recent_emails or search_emails.")] string id,
+        [Description(AccountDescription)] string? account = null,
+        CancellationToken cancellationToken = default) =>
+        ToolGuard.RunAsync(() => Mail(account).GetMessageAsync(id, cancellationToken));
+
+    private IEmailProvider Mail(string? account)
     {
-        _logger.LogInformation("Getting email {Id}", id);
-        return await _emailProvider.GetMessageAsync(id, cancellationToken);
+        var resolved = _accounts.Resolve(account);
+        return resolved.Email
+               ?? throw new InvalidOperationException($"Account '{resolved.Name}' does not provide mail.");
     }
 }

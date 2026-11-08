@@ -28,21 +28,18 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
           cache: true
-          cache-dependency-path: McpMailGuard/McpMailGuard.csproj
+          cache-dependency-path: |
+            McpMailGuard/McpMailGuard.csproj
+            McpMailGuard.Tests/McpMailGuard.Tests.csproj
 
       - name: Restore
-        run: dotnet restore McpMailGuard/McpMailGuard.csproj
+        run: dotnet restore McpMailGuard.Tests/McpMailGuard.Tests.csproj
 
       - name: Build
-        run: dotnet build McpMailGuard/McpMailGuard.csproj -c Release --no-restore
+        run: dotnet build McpMailGuard.Tests/McpMailGuard.Tests.csproj -c Release --no-restore
 
       - name: Test
-        run: |
-          if find . -name '*Tests.csproj' -not -path '*/bin/*' -not -path '*/obj/*' | grep -q .; then
-            dotnet test -c Release --no-build
-          else
-            echo "No test projects found — skipping tests."
-          fi
+        run: dotnet test McpMailGuard.Tests/McpMailGuard.Tests.csproj -c Release --no-build
 
   license:
     name: License Check

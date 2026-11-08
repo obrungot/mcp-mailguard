@@ -6,206 +6,182 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![.NET](https://img.shields.io/badge/.NET-10.0-512BD4.svg)](https://dotnet.microsoft.com/)
-[![MCP](https://img.shields.io/badge/MCP-stdio-1f6feb.svg)](https://modelcontextprotocol.io/)
+[![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-1f6feb.svg)](https://modelcontextprotocol.io/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED.svg)](Dockerfile)
 
 </div>
 
 ---
 
-McpMailGuard is an [MCP (Model Context Protocol)](https://modelcontextprotocol.io/) **stdio** server
-that gives AI agents **read-only** access to a personal email and calendar account. The first
-supported backend is **Microsoft Outlook / Microsoft 365 / Outlook.com via Microsoft Graph**, but the
-code is built around provider abstractions so additional backends (e.g. Gmail, IMAP) can be added
-without touching the MCP tools.
+McpMailGuard is an [MCP](https://modelcontextprotocol.io/) server that lets an AI agent **read** your
+mail and calendar, and nothing else. It runs as a small, long-lived Docker service that an agent such
+as [OpenClaw](https://docs.openclaw.ai/) reaches over HTTP on a private Docker network.
 
-It ships as a **self-contained** binary and a hardened **Docker** image, ready to deploy on Ubuntu.
+Supported today: **Microsoft personal accounts (Hotmail / Outlook.com / Live)** and Microsoft 365, via
+Microsoft Graph. Accounts are pluggable, so Gmail can be added later next to Hotmail on the same server.
 
-## ✨ Features
+## Features
 
-- **Read-only by design** — no send, delete, or modify tools are exposed.
-- **Six MCP tools** for reading and searching mail and calendar.
-- **Works with personal accounts** (Hotmail / Outlook.com) via delegated device-code sign-in.
-- **Provider abstraction** (`IEmailProvider`, `ICalendarProvider`) — swap or add backends via configuration.
-- **Self-contained, single-file** binary — no .NET runtime required on the host.
-- **Hardened Docker recipe** — minimal runtime-deps base, runs as a non-root user, read-only-filesystem friendly.
+- **Read-only by design**: no send, delete, move or modify tools, and only read permissions are requested.
+- **Several accounts on one server**, each with a name the agent passes as `account`.
+- **Sign in once** with a device code from a terminal; the server then works without prompting, across restarts.
+- **Fails fast** when an account isn't signed in, instead of hanging in the middle of an agent's request.
+- **Agent-friendly output**: list results carry short previews, full messages are plain text with a size cap.
+- **Hardened container**: non-root, read-only filesystem, no capabilities, no published ports, API key required.
 
-## 🧰 Tools exposed to agents
+## Tools
 
 | Tool | Description |
 | --- | --- |
-| `get_recent_emails` | Lists the most recent emails (newest first); optional folder and query. |
-| `search_emails` | Full-text search of emails. |
-| `get_email` | Retrieves the full content of a single email by id. |
-| `get_upcoming_events` | Lists upcoming calendar events ordered by start time. |
-| `search_events` | Full-text search of calendar events. |
-| `get_event` | Retrieves the full details of a single event by id. |
+| `list_accounts` | Lists the configured accounts. |
+| `get_recent_emails` | Latest emails in a folder (`inbox`, `sent`, `drafts`, `archive`, `deleted`, `junk`, `all`), newest first. |
+| `search_emails` | Full-text search of emails, optionally within a folder. |
+| `get_email` | One email with its full plain-text body. |
+| `get_upcoming_events` | Events from now until *n* days ahead; recurring events are expanded. |
+| `search_events` | Events matching text within a window around today. |
+| `get_event` | One event with its full description. |
 
-## 🚀 Quick start
+Every tool except `list_accounts` takes an optional `account` argument; it can be left out when only
+one account is configured. All times are UTC.
 
-### 1. Register an app in Microsoft Entra ID
+## Setup on Ubuntu with OpenClaw
 
-1. Sign in to the [Microsoft Entra admin center](https://entra.microsoft.com/).
-2. **App registrations → New registration**.
-3. **Supported account types** — pick based on your mailbox:
-   - **Personal (Hotmail/Outlook.com):** *Personal Microsoft accounts only* (or *Accounts in any organizational directory and personal Microsoft accounts*).
-   - **Work/school:** *Accounts in this organizational directory only*.
-4. From the **Overview**, note the **Application (client) ID** and **Directory (tenant) ID**.
-5. **Authentication → Allow public client flows → Yes** — required for the `DeviceCode` and `InteractiveBrowser` modes.
-6. **API permissions → Microsoft Graph** — add the permissions matching your mode:
-   - **Delegated** `Mail.Read` and `Calendars.Read` — for `DeviceCode` / `InteractiveBrowser` (recommended).
-   - **Application** `Mail.Read` and `Calendars.Read` — for `ClientCredentials` (work/school only), then **Grant admin consent**.
-7. Add a **client secret** only if you use `ClientCredentials`.
+### 1. Register an app in Microsoft Entra
 
-### 2. Choose an authentication mode
+1. Sign in to the [Microsoft Entra admin center](https://entra.microsoft.com/) (or the Azure portal) with any Microsoft account.
+2. **App registrations → New registration.**
+   - **Supported account types:** *Personal Microsoft accounts only*.
+   - No redirect URI is needed.
+3. Copy the **Application (client) ID** from the overview.
+4. **Authentication → Advanced settings → Allow public client flows → Yes**, then save. Device-code sign-in needs this.
+5. **API permissions → Add → Microsoft Graph → Delegated:** `Mail.Read`, `Calendars.Read`, `User.Read`, `offline_access`.
 
-| `Graph:AuthMode` | Use for | Client secret | `Graph:UserId` | Uses `/me` |
-| --- | --- | --- | --- | --- |
-| `DeviceCode` *(recommended for personal)* | Hotmail/Outlook.com **and** work/school | No | not needed | Yes |
-| `InteractiveBrowser` | Desktop machines | No | not needed | Yes |
-| `ClientCredentials` | App-only, **organizational mailboxes only** | Yes | **required** | No |
+No client secret is needed.
 
-If `AuthMode` is left empty it is inferred: a client secret implies `ClientCredentials`, otherwise `DeviceCode`.
-
-### 3. Configure credentials
-
-Via environment variables (the `__` maps to the `Graph:` config section):
+### 2. Configure
 
 ```bash
-# Personal Hotmail/Outlook.com — recommended
-export Graph__AuthMode="DeviceCode"
-export Graph__ClientId="<client-id>"
-export Graph__TenantId="consumers"     # "common" also works for mixed account types
-# no client secret needed for DeviceCode
-
-# App-only, work/school mailbox (organizational only)
-# export Graph__AuthMode="ClientCredentials"
-# export Graph__TenantId="<tenant-id>"
-# export Graph__ClientSecret="<secret>"
-# export Graph__UserId="user@contoso.com"
+git clone <this repo> mcp-mailguard && cd mcp-mailguard
+cp .env.example .env
+openssl rand -base64 32        # use the output as MailGuard__ApiKey
+nano .env                      # set MailGuard__ApiKey and Accounts__hotmail__ClientId
 ```
 
-> In a delegated mode, `Graph:TenantId` is **optional** — if omitted, the server auto-selects the
-> right endpoint (it tries `consumers`, then `common`, then `organizations`), so a personal-only
-> app registration works with no extra configuration.
+### 3. Share a Docker network with OpenClaw
 
-Or copy `.env.example` to `.env` for Docker usage.
-
-### 4. Run it
+The server publishes no port on the host. OpenClaw reaches it by container name on a shared network.
 
 ```bash
-# From source
-cd McpMailGuard
-dotnet run -c Release
-
-# Or with Docker
-docker build -t mcp-mailguard:latest .
-docker run -i --rm --env-file .env mcp-mailguard:latest
+docker network create openclaw
 ```
 
-In `DeviceCode` mode, sign in **once** so the token is cached (`Graph:EnableTokenCache`) and later
-calls are silent. The easiest way is the built-in pre-authentication command, which prompts
-*outside* of any MCP tool call (so the client can't time it out):
+Then attach OpenClaw's service to that network in OpenClaw's own `docker-compose.yml`:
+
+```yaml
+services:
+  openclaw:            # your existing OpenClaw service
+    networks: [default, openclaw]
+networks:
+  openclaw:
+    external: true
+```
+
+If OpenClaw's compose project already creates a network you'd rather reuse, set `OPENCLAW_NETWORK`
+in `.env` to its name instead (see `docker network ls`).
+
+### 4. Build, sign in once, start
 
 ```bash
-dotnet run -c Release -- --login
-# Docker:
-docker run -it --rm --env-file .env mcp-mailguard:latest --login
+docker compose build
+docker compose run --rm mailguard login hotmail
+docker compose up -d
 ```
 
-A sign-in code is printed to **stderr**; open <https://microsoft.com/devicelogin>, enter the code,
-and finish signing in. (You can also just call a tool and complete the prompt then.)
+`login` prints a code. Open <https://microsoft.com/devicelogin> on any device, enter the code and
+sign in with your Hotmail account. The sign-in is saved in the `mailguard-data` volume; the server
+refreshes it silently from then on. Run `login` again if Microsoft ever revokes it (for example after
+a password change); a running server picks up the new sign-in without a restart.
 
-> The process communicates over stdio. Logs and sign-in prompts go to **stderr** so they never
-> corrupt the JSON-RPC protocol on **stdout**.
+### 5. Connect OpenClaw
 
-## 🔌 Connect an MCP client
-
-**VS Code** (`.vscode/mcp.json`):
+Add the server to OpenClaw's config (see [OpenClaw MCP docs](https://docs.openclaw.ai/tools/mcp)):
 
 ```json
 {
-  "servers": {
-    "McpMailGuard": {
-      "type": "stdio",
-      "command": "dotnet",
-      "args": ["run", "--project", "<PATH TO McpMailGuard PROJECT>"]
+  "mcp": {
+    "servers": {
+      "mailguard": {
+        "url": "http://mailguard:8080/mcp",
+        "transport": "streamable-http",
+        "headers": { "Authorization": "Bearer <your MailGuard__ApiKey>" }
+      }
     }
   }
 }
 ```
 
-**Claude Desktop / other clients:**
+Check the connection with `openclaw mcp doctor mailguard --probe`, then ask OpenClaw something like
+"what's on my calendar this week?".
 
-```json
-{
-  "mcpServers": {
-    "McpMailGuard": {
-      "command": "docker",
-      "args": ["run", "-i", "--rm", "--env-file", "/path/to/.env", "mcp-mailguard:latest"]
-    }
-  }
-}
+## Configuration
+
+Settings come from `appsettings.json` next to the executable, then `appsettings.Local.json`
+(git-ignored, local runs only), then environment variables, then command-line options.
+Environment variables use `__` between sections.
+
+| Setting | Description |
+| --- | --- |
+| `MailGuard__ApiKey` | **Required.** Clients must send `Authorization: Bearer <key>`. |
+| `MailGuard__DataDirectory` | Where sign-ins are stored. `/data` in the container. |
+| `MailGuard__MaxBodyChars` | Max characters of a body/description returned (default 20000). |
+| `Accounts__<name>__Provider` | `Microsoft` (Gmail will be `Google`). |
+| `Accounts__<name>__ClientId` | Entra application (client) ID. |
+| `Accounts__<name>__TenantId` | `consumers` (default, personal accounts), `organizations`, or a tenant id. |
+| `Urls` | Listen address. `http://+:8080` in the container, `http://localhost:8080` locally. |
+
+## Security notes
+
+- The API key is the only thing between the network and your mailbox. Keep it long and random, and
+  don't publish port 8080 on the host unless you put TLS and the key in front of it.
+- The `mailguard-data` volume holds a refresh token that grants read access to your mail and calendar.
+  Containers have no OS keyring, so it is stored as a file readable only by the container user
+  (uid 10001). Anyone with root on the host can read it. Treat the volume like a password.
+- To revoke access, remove the app's consent at <https://account.live.com/consent/Manage> and delete
+  the volume (`docker compose down -v`).
+
+## Running locally (development)
+
+```bash
+# McpMailGuard/appsettings.Local.json (git-ignored):
+# { "MailGuard": { "ApiKey": "dev-key" },
+#   "Accounts": { "hotmail": { "Provider": "Microsoft", "ClientId": "<app id>" } } }
+
+dotnet run --project McpMailGuard -- login hotmail
+dotnet run --project McpMailGuard              # serves http://localhost:8080/mcp
+dotnet test McpMailGuard.slnx
 ```
 
-## 🏗 Architecture
+Try the tools with the MCP Inspector (`npx @modelcontextprotocol/inspector`), using transport
+"Streamable HTTP", URL `http://localhost:8080/mcp` and header `Authorization: Bearer dev-key`.
 
-```
-McpMailGuard/
-├── Abstractions/          # Provider contracts (extension points)
-│   ├── IEmailProvider.cs
-│   └── ICalendarProvider.cs
-├── Models/                # Provider-neutral DTOs + configuration
-├── Providers/
-│   └── Graph/             # Microsoft Graph implementation
-│       ├── GraphClientBuilder.cs      # app-only + delegated auth
-│       ├── GraphUserScope.cs          # /me vs /users/{id}
-│       ├── GraphEmailProvider.cs
-│       └── GraphCalendarProvider.cs
-├── Tools/                 # MCP tools exposed to agents
-│   ├── MailTools.cs
-│   └── CalendarTools.cs
-└── Program.cs             # Host + DI wiring + provider selection
-```
-
-The MCP tools depend only on the abstractions, never on Graph directly — adding a provider means
-implementing `IEmailProvider` / `ICalendarProvider` and registering it in `Program.cs`.
-
-## 🧩 Extending
-
-### Adding a provider (e.g. Gmail)
-
-1. Implement `IEmailProvider` and `ICalendarProvider` under `Providers/<YourProvider>/`.
-2. Register the implementation in `Program.cs`, optionally gated by a `Provider` setting.
-
-### Authentication modes
-
-`GraphClientBuilder` supports app-only (`ClientCredentials`) and delegated
-(`DeviceCode`, `InteractiveBrowser`) flows. Delegated flows act as the signed-in user (`/me`);
-app-only has no user context and addresses `Graph:UserId` via `/users/{id}`.
-
-## 🩺 Troubleshooting
+## Troubleshooting
 
 | Symptom | Cause / fix |
 | --- | --- |
-| `TaskCanceledException` / "A task was canceled" during a tool call | The device-code sign-in never completed. The code is printed to **stderr** — check the server log/output window, then sign in at <https://microsoft.com/devicelogin>. Do not let the MCP client cancel the call before you finish. |
-| `AADSTS700016` — application not found in directory | Wrong `Graph:TenantId` for the account type. Use `consumers` for personal accounts, or the tenant GUID for work/school. |
-| `AADSTS65001` / consent required | Permissions not consented. Use **Delegated** permissions for `DeviceCode`, or grant admin consent for app-only. |
-| `AADSTS500011` / public client required | Enable **Authentication → Allow public client flows → Yes** on the app registration. |
-| App-only mode fails on `/me` | App-only tokens have no user. Set `Graph:UserId`, or switch to `DeviceCode`. Personal accounts cannot use app-only at all. |
-| Corrupted MCP stream / client disconnects | Something wrote to stdout. All logging and prompts must go to **stderr**. |
+| Tool error "Account 'hotmail' is not signed in" | Run `docker compose run --rm mailguard login hotmail`. |
+| `AADSTS700016` (application not found) | Wrong ClientId, or TenantId doesn't match the app's account type. Personal-only apps use `consumers`. |
+| `AADSTS9002346` | The app is personal-accounts-only; set TenantId to `consumers`. |
+| `AADSTS7000218` / public client error | Enable **Allow public client flows** on the app registration. |
+| OpenClaw gets 401 | The `Authorization` header doesn't match `MailGuard__ApiKey`. |
+| OpenClaw can't resolve `mailguard` | Both containers must be on the same Docker network. |
+| Server exits with "ApiKey is not set" | Set `MailGuard__ApiKey` in `.env`. |
 
-## 🔒 Security
+## Adding a provider (e.g. Gmail)
 
-- The server is **read-only** — no mutating tools are exposed.
-- Never commit `.env` or secrets — the provided `.gitignore` excludes them.
-- Run the container with a read-only filesystem and no capabilities (see `docker-compose.yml`).
-- On Linux, `Graph:EnableTokenCache=true` requires a secret service; disable it in minimal containers.
+Implement `IAccountProviderFactory` (in `McpMailGuard/Accounts/`) plus `IEmailProvider` and
+`ICalendarProvider`, and register the factory in `Program.cs`. The tools, account registry, API key
+and Docker setup don't change. See [`McpMailGuard/README.md`](McpMailGuard/README.md) for the design.
 
-## 📄 License
+## License
 
 Released under the [MIT License](LICENSE).
-
-## 📚 Documentation
-
-See [`McpMailGuard/README.md`](McpMailGuard/README.md) for package-level details.

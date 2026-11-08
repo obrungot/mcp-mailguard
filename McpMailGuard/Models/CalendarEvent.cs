@@ -4,48 +4,56 @@
 namespace McpMailGuard.Models;
 
 /// <summary>
-/// Model representing a calendar event from a supported provider.
-/// All properties are optional where providers differ in what metadata they expose.
+/// A calendar event (or one occurrence of a recurring event) as returned to agents.
+/// Properties a provider does not expose are null.
 /// </summary>
 public class CalendarEvent
 {
     /// <summary>
-    /// Unique identifier for the event across the provider.
+    /// Provider-specific id; pass it to get_event.
     /// </summary>
     public string? Id { get; set; }
 
-    /// <summary>
-    /// Title / summary of the event.
-    /// </summary>
     public string? Title { get; set; }
 
     /// <summary>
-    /// Description / details of the event.
-    /// </summary>
-    public string? Description { get; set; }
-
-    /// <summary>
-    /// Start date/time (UTC).
+    /// Start time (UTC). For all-day events this is midnight UTC of the first day.
     /// </summary>
     public DateTimeOffset? Start { get; set; }
 
     /// <summary>
-    /// End date/time (UTC).
+    /// End time (UTC). For all-day events this is midnight UTC after the last day.
     /// </summary>
     public DateTimeOffset? End { get; set; }
 
-    /// <summary>
-    /// Calendar ID this event belongs to.
-    /// </summary>
-    public string? CalendarId { get; set; }
+    public bool? IsAllDay { get; set; }
 
-    /// <summary>
-    /// Location of the event.
-    /// </summary>
     public string? Location { get; set; }
 
     /// <summary>
-    /// Whether the event is all-day.
+    /// Organizer, as "Name &lt;address&gt;" when a display name is known.
     /// </summary>
-    public bool? IsAllDay { get; set; }
+    public string? Organizer { get; set; }
+
+    /// <summary>
+    /// Comma-separated attendees.
+    /// </summary>
+    public string? Attendees { get; set; }
+
+    public bool? IsCancelled { get; set; }
+
+    /// <summary>
+    /// A short plain-text excerpt of the description. Set in list and search results.
+    /// </summary>
+    public string? Preview { get; set; }
+
+    /// <summary>
+    /// The plain-text description. Set only when a single event is retrieved.
+    /// </summary>
+    public string? Description { get; set; }
+
+    /// <summary>
+    /// True when <see cref="Description"/> was cut to the server's maximum length.
+    /// </summary>
+    public bool? DescriptionTruncated { get; set; }
 }

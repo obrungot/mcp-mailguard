@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="McpMailGuard/McpMailGuard.csproj" />
+  <Project Path="McpMailGuard.Tests/McpMailGuard.Tests.csproj" />
+</Solution>

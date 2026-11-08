@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk.Web">
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
@@ -6,55 +6,42 @@
     <OutputType>Exe</OutputType>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-
-    <!-- Set up the NuGet package to be an MCP server -->
-    <PackAsTool>true</PackAsTool>
-    <PackageType>McpServer</PackageType>
-
-    <!-- Set up the MCP server to be a self-contained application that does not rely on a shared framework -->
-    <SelfContained>true</SelfContained>
-    <PublishSelfContained>true</PublishSelfContained>
-
-    <!-- Set up the MCP server to be a single file executable -->
-    <PublishSingleFile>true</PublishSingleFile>
-
-    <!-- Recommended package metadata -->
-    <PackageReadmeFile>README.md</PackageReadmeFile>
     <AssemblyName>McpMailGuard</AssemblyName>
     <RootNamespace>McpMailGuard</RootNamespace>
-    <PackageId>McpMailGuard</PackageId>
-    <PackageVersion>0.1.0-beta</PackageVersion>
-    <Authors>McpMailGuard contributors</Authors>
-    <PackageTags>AI; MCP; server; stdio; email; calendar; outlook; graph</PackageTags>
-    <Description>An MCP server providing read-only access to email and calendar accounts, starting with Microsoft Outlook via Microsoft Graph.</Description>
+    <Version>0.2.0</Version>
+    <Description>An MCP server (Streamable HTTP) providing read-only access to email and calendar accounts, starting with Microsoft Outlook.com / Microsoft 365 via Microsoft Graph.</Description>
+
+    <!-- Published as a self-contained, single-file executable (no .NET runtime needed on the host). -->
+    <PublishSelfContained>true</PublishSelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
   </PropertyGroup>
 
-  <!-- Include additional files for browsing the MCP server. -->
   <ItemGroup>
-    <None Include=".mcp\server.json" Pack="true" PackagePath="/.mcp/" />
-    <None Include="README.md" Pack="true" PackagePath="/" />
+    <InternalsVisibleTo Include="McpMailGuard.Tests" />
   </ItemGroup>
 
-  <!-- Ship appsettings.json alongside the executable (build + publish). -->
+  <!-- appsettings.json ships next to the executable (build + publish). -->
   <ItemGroup>
-    <None Update="appsettings.json">
+    <Content Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </None>
+    </Content>
     <!-- Local (git-ignored) settings: copied for local build/run only. Intentionally NOT copied
          to the publish output, so secrets are never baked into a published artifact or Docker image. -->
-    <None Update="appsettings.Local.json">
+    <Content Update="appsettings.Local.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
+    <Content Update="appsettings.Development.json">
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Azure.Identity" Version="1.21.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="10.0.14" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="10.0.14" />
-    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.83.1" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.83.1" />
     <PackageReference Include="Microsoft.Graph" Version="6.9.0" />
-    <PackageReference Include="ModelContextProtocol" Version="2.1.0" />
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.2.0" />
   </ItemGroup>
 
 </Project>
