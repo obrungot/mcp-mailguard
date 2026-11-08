@@ -15,6 +15,8 @@
 
 # Local secrets
 .env
+appsettings.Local.json
+**/appsettings.Local.json
 docker-compose.override.yml
 
 # Docs / tooling not needed in image

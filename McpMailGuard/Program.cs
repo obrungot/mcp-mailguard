@@ -15,8 +15,13 @@ var builder = Host.CreateApplicationBuilder(args);
 // Configure all logs to go to stderr (stdout is reserved for the MCP protocol).
 builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
 
-// Load appsettings.json (optional) and environment variables.
+// Load configuration from the app's base directory (so it works no matter which working
+// directory the MCP client launches the server from) and from the current directory, then
+// environment variables, which take precedence.
+var baseDirectory = AppContext.BaseDirectory;
 builder.Configuration
+    .AddJsonFile(Path.Combine(baseDirectory, "appsettings.json"), optional: true, reloadOnChange: true)
+    .AddJsonFile(Path.Combine(baseDirectory, "appsettings.Local.json"), optional: true, reloadOnChange: true)
     .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
     .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
     .AddEnvironmentVariables();

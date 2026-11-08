@@ -37,13 +37,14 @@
 
   <!-- Ship appsettings.json alongside the executable (build + publish). -->
   <ItemGroup>
-    <None Update="appsettings.Local.json">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </None>
     <None Update="appsettings.json">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </None>
+    <!-- Local (git-ignored) settings: copied for local build/run only. Intentionally NOT copied
+         to the publish output, so secrets are never baked into a published artifact or Docker image. -->
+    <None Update="appsettings.Local.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
   </ItemGroup>
 
