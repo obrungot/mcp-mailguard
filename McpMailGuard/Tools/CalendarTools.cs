@@ -3,56 +3,75 @@
 
 using System.ComponentModel;
 using McpMailGuard.Abstractions;
+using McpMailGuard.Accounts;
 using McpMailGuard.Models;
-using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
 namespace McpMailGuard.Tools;
 
 /// <summary>
-/// Calendar-related MCP tools for agent interaction.
+/// Read-only calendar tools. All times are UTC.
 /// </summary>
-public class CalendarTools
+[McpServerToolType]
+public sealed class CalendarTools
 {
-    private readonly ICalendarProvider _calendarProvider;
-    private readonly ILogger<CalendarTools> _logger;
+    private const string AccountDescription =
+        "Account name from list_accounts. May be omitted when only one account is configured.";
 
-    public CalendarTools(ICalendarProvider calendarProvider, ILogger<CalendarTools> logger)
+    private const int MaxDays = 3660;
+
+    private readonly AccountRegistry _accounts;
+    private readonly TimeProvider _time;
+
+    public CalendarTools(AccountRegistry accounts, TimeProvider time)
     {
-        _calendarProvider = calendarProvider;
-        _logger = logger;
+        _accounts = accounts;
+        _time = time;
     }
 
-    [McpServerTool]
-    [Description("Gets a list of upcoming calendar events, ordered by start time.")]
-    public async Task<IReadOnlyList<CalendarEvent>> GetUpcomingEventsAsync(
-        [Description("Maximum number of events to return")] int maxResults = 20,
-        [Description("The calendar to read from; 'calendar' means the default calendar")] string calendarId = "calendar",
+    [McpServerTool(Name = "get_upcoming_events", ReadOnly = true, OpenWorld = false)]
+    [Description("Lists calendar events from now until the given number of days ahead, ordered by start time. Recurring events appear as separate occurrences. Times are UTC.")]
+    public Task<IReadOnlyList<CalendarEvent>> GetUpcomingEventsAsync(
+        [Description("How many days ahead to look.")] int days = 14,
+        [Description("Maximum number of events to return (1-50).")] int maxResults = 20,
+        [Description(AccountDescription)] string? account = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Fetching upcoming events (calendar={Calendar}, max={Max})", calendarId, maxResults);
-        return await _calendarProvider.ListEventsAsync(calendarId, maxResults, cancellationToken);
+        var now = _time.GetUtcNow();
+        var end = now.AddDays(Math.Max(1, ToolGuard.ClampDays(days, MaxDays)));
+        return ToolGuard.RunAsync(() => Calendar(account)
+            .ListEventsAsync(now, end, ToolGuard.ClampResults(maxResults), cancellationToken));
     }
 
-    [McpServerTool]
-    [Description("Searches calendar events for a text query and returns the matches.")]
-    public async Task<IReadOnlyList<CalendarEvent>> SearchEventsAsync(
-        [Description("Search query text")] string query,
-        [Description("Maximum number of events to return")] int maxResults = 20,
+    [McpServerTool(Name = "search_events", ReadOnly = true, OpenWorld = false)]
+    [Description("Finds calendar events whose title, location, organizer, attendees or description contain the query, within a window around today. Times are UTC.")]
+    public Task<IReadOnlyList<CalendarEvent>> SearchEventsAsync(
+        [Description("Text to look for.")] string query,
+        [Description("How many days back from today to include.")] int daysBack = 90,
+        [Description("How many days ahead of today to include.")] int daysAhead = 365,
+        [Description("Maximum number of events to return (1-50).")] int maxResults = 20,
+        [Description(AccountDescription)] string? account = null,
         CancellationToken cancellationToken = default)
     {
-        _logger.LogInformation("Searching events for query '{Query}' (max={Max})", query, maxResults);
-        return await _calendarProvider.SearchAsync(query, maxResults, cancellationToken);
+        var now = _time.GetUtcNow();
+        var start = now.AddDays(-ToolGuard.ClampDays(daysBack, MaxDays));
+        var end = now.AddDays(ToolGuard.ClampDays(daysAhead, MaxDays));
+        return ToolGuard.RunAsync(() => Calendar(account)
+            .SearchAsync(query, start, end, ToolGuard.ClampResults(maxResults), cancellationToken));
     }
 
-    [McpServerTool]
-    [Description("Gets the full details of a single calendar event by its id.")]
-    public async Task<CalendarEvent?> GetEventAsync(
-        [Description("The event id returned by GetUpcomingEvents or SearchEvents")] string id,
-        [Description("The calendar the event belongs to; 'calendar' means the default calendar")] string calendarId = "calendar",
-        CancellationToken cancellationToken = default)
+    [McpServerTool(Name = "get_event", ReadOnly = true, OpenWorld = false)]
+    [Description("Gets one calendar event with its full plain-text description. Times are UTC.")]
+    public Task<CalendarEvent?> GetEventAsync(
+        [Description("Event id from get_upcoming_events or search_events.")] string id,
+        [Description(AccountDescription)] string? account = null,
+        CancellationToken cancellationToken = default) =>
+        ToolGuard.RunAsync(() => Calendar(account).GetEventAsync(id, cancellationToken));
+
+    private ICalendarProvider Calendar(string? account)
     {
-        _logger.LogInformation("Getting event {Id}", id);
-        return await _calendarProvider.GetEventAsync(id, calendarId, cancellationToken);
+        var resolved = _accounts.Resolve(account);
+        return resolved.Calendar
+               ?? throw new InvalidOperationException($"Account '{resolved.Name}' does not provide a calendar.");
     }
 }

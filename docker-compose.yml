@@ -1,31 +1,41 @@
-version: "3.9"
+# McpMailGuard as a long-running MCP server for an agent (e.g. OpenClaw) running in another
+# container on the same host. The agent reaches it at http://mailguard:8080/mcp over a shared
+# Docker network; no port is published on the host.
+#
+# One-time setup:
+#   docker network create openclaw          # or reuse the network OpenClaw's compose already creates
+#   cp .env.example .env                    # fill in the account and API key
+#   docker compose build
+#   docker compose run --rm mailguard login hotmail
+#   docker compose up -d
 
 services:
-  mcp-mailguard:
+  mailguard:
     build:
       context: .
       dockerfile: Dockerfile
     image: mcp-mailguard:latest
-    container_name: mcp-mailguard
-    # Read-only filesystem for defense in depth.
+    container_name: mailguard
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      # Saved sign-ins and token caches. Keep this volume private; it grants read access to your mail.
+      - mailguard-data:/data
+    networks:
+      - agents
+    # Defense in depth.
     read_only: true
-    # Temporary writable locations for the app and OS.
     tmpfs:
       - /tmp:rw,noexec,nosuid
-      - /var/tmp:rw,noexec,nosuid
-    # Drop all capabilities for defense in depth.
     cap_drop:
       - ALL
-    # No new privileges.
     security_opt:
       - no-new-privileges:true
-    # Environment variables are injected at runtime via .env.
-    environment:
-      - DOTNET_ENVIRONMENT=${DOTNET_ENVIRONMENT:-Production}
-      - Graph__ClientId=${GRAPH_CLIENT_ID}
-      - Graph__TenantId=${GRAPH_TENANT_ID}
-      - Graph__ClientSecret=${GRAPH_CLIENT_SECRET}
-    # Stdio transport: the container is long-lived and communicates over stdin/stdout.
-    # Use `docker run -i` or attach to the container to interact.
-    stdin_open: true
-    tty: true
+
+volumes:
+  mailguard-data:
+
+networks:
+  agents:
+    external: true
+    name: ${OPENCLAW_NETWORK:-openclaw}

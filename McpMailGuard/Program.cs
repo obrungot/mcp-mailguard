@@ -1,94 +1,106 @@
 // SPDX-License-Identifier: MIT
 // SPDX-FileCopyrightText: 2026 Olaf Brungot
 
-using McpMailGuard.Abstractions;
-using McpMailGuard.Models;
-using McpMailGuard.Providers.Graph;
+using McpMailGuard.Accounts;
+using McpMailGuard.Hosting;
+using McpMailGuard.Providers.Microsoft;
 using McpMailGuard.Tools;
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
-using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using ModelContextProtocol.AspNetCore;
 
-var builder = Host.CreateApplicationBuilder(args);
+// Commands:
+//   McpMailGuard                 serve MCP over Streamable HTTP at /mcp (default)
+//   McpMailGuard login [account] interactive sign-in for an account, then exit
+var command = args.Length > 0 && !args[0].StartsWith('-') ? args[0].ToLowerInvariant() : "serve";
+var commandArgs = command == "serve" ? [] : args.Skip(1).Where(a => !a.StartsWith('-')).ToArray();
+var hostArgs = args.Where(a => a.StartsWith('-')).ToArray();
 
-// Configure all logs to go to stderr (stdout is reserved for the MCP protocol).
-builder.Logging.AddConsole(o => o.LogToStandardErrorThreshold = LogLevel.Trace);
-
-// Load configuration from the app's base directory (so it works no matter which working
-// directory the MCP client launches the server from) and from the current directory, then
-// environment variables, which take precedence.
-var baseDirectory = AppContext.BaseDirectory;
-builder.Configuration
-    .AddJsonFile(Path.Combine(baseDirectory, "appsettings.json"), optional: true, reloadOnChange: true)
-    .AddJsonFile(Path.Combine(baseDirectory, "appsettings.Local.json"), optional: true, reloadOnChange: true)
-    .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-    .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
-    .AddEnvironmentVariables();
-
-static GraphAuthConfig ReadGraphConfig(IConfiguration configuration) =>
-    configuration.GetSection("Graph").Get<GraphAuthConfig>()
-    ?? throw new InvalidOperationException("Missing 'Graph' configuration section.");
-
-// ----- Optional pre-authentication mode -----------------------------------
-// Run `dotnet run -- --login` (or `docker run -it ... --login`) to perform the
-// interactive sign-in once and populate the token cache, so MCP tool calls never
-// have to prompt. Especially useful for DeviceCode/InteractiveBrowser modes.
-if (args.Any(a => string.Equals(a, "--login", StringComparison.OrdinalIgnoreCase)))
+// Read configuration next to the executable, so it works whatever directory the server starts in.
+// Precedence (lowest to highest): appsettings.json, appsettings.Local.json, environment, command line.
+var builder = WebApplication.CreateBuilder(new WebApplicationOptions
 {
-    var config = ReadGraphConfig(builder.Configuration);
-    var client = GraphClientBuilder.Create(config);
-
-    Console.Error.WriteLine("Authenticating with Microsoft Graph...");
-    if (config.ResolveAuthMode() == GraphAuthMode.DeviceCode)
-        Console.Error.WriteLine("Watch for the sign-in code below, then visit https://microsoft.com/devicelogin");
-
-    try
-    {
-        if (config.ResolveAuthMode() != GraphAuthMode.ClientCredentials)
-        {
-            await client.Me.GetAsync(); // delegated: acts as the signed-in user
-        }
-        else
-        {
-            if (string.IsNullOrWhiteSpace(config.UserId))
-                throw new InvalidOperationException("App-only mode requires 'Graph:UserId'.");
-            await client.Users[config.UserId].GetAsync(); // app-only: address a specific mailbox
-        }
-
-        Console.Error.WriteLine("Authentication succeeded. The token has been cached.");
-        return 0;
-    }
-    catch (Exception ex)
-    {
-        Console.Error.WriteLine($"Authentication failed: {GraphErrors.Describe(ex).Message}");
-        return 1;
-    }
-}
-
-// ----- Microsoft Graph ----------------------------------------------------
-builder.Services.Configure<GraphAuthConfig>(builder.Configuration.GetSection("Graph"));
-
-builder.Services.AddSingleton(sp =>
-    GraphClientBuilder.Create(ReadGraphConfig(builder.Configuration)));
-
-builder.Services.AddSingleton(sp =>
-{
-    var config = ReadGraphConfig(builder.Configuration);
-    var isDelegated = config.ResolveAuthMode() != GraphAuthMode.ClientCredentials;
-    return isDelegated
-        ? new GraphUserScope(useMe: true, userId: null)
-        : new GraphUserScope(useMe: false, userId: config.UserId);
+    Args = hostArgs,
+    ContentRootPath = AppContext.BaseDirectory
 });
+builder.Configuration
+    .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false)
+    .AddEnvironmentVariables()
+    .AddCommandLine(hostArgs);
 
-builder.Services.AddSingleton<IEmailProvider, GraphEmailProvider>();
-builder.Services.AddSingleton<ICalendarProvider, GraphCalendarProvider>();
+builder.Services.Configure<MailGuardOptions>(builder.Configuration.GetSection(MailGuardOptions.SectionName));
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddSingleton(sp =>
+    new AccountStore(sp.GetRequiredService<IOptions<MailGuardOptions>>().Value.ResolveDataDirectory()));
 
-// ----- MCP server ---------------------------------------------------------
+// Account providers. To add a backend (e.g. Gmail), implement IAccountProviderFactory and register it here.
+builder.Services.AddSingleton<IAccountProviderFactory, MicrosoftAccountProviderFactory>();
+builder.Services.AddSingleton(sp => new AccountRegistry(
+    builder.Configuration,
+    sp.GetServices<IAccountProviderFactory>(),
+    sp.GetRequiredService<AccountStore>(),
+    sp));
+
 builder.Services.AddMcpServer()
-    .WithStdioServerTransport()
+    .WithHttpTransport(o => o.SessionMode = HttpServerSessionMode.StatefulForInitializeClients)
+    .WithTools<AccountTools>()
     .WithTools<MailTools>()
     .WithTools<CalendarTools>();
 
-await builder.Build().RunAsync();
-return 0;
+var app = builder.Build();
+
+switch (command)
+{
+    case "login":
+    {
+        using var cancellation = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) =>
+        {
+            e.Cancel = true;
+            cancellation.Cancel();
+        };
+
+        return await LoginCommand.RunAsync(
+            app.Services, app.Configuration, commandArgs.FirstOrDefault(), Console.Out, Console.Error, cancellation.Token);
+    }
+
+    case "serve":
+    {
+        var logger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("McpMailGuard");
+        var options = app.Services.GetRequiredService<IOptions<MailGuardOptions>>().Value;
+        if (string.IsNullOrWhiteSpace(options.ApiKey))
+        {
+            logger.LogCritical(
+                "MailGuard:ApiKey is not set (environment variable MailGuard__ApiKey). " +
+                "Refusing to serve mail without client authentication.");
+            return 1;
+        }
+
+        AccountRegistry registry;
+        try
+        {
+            registry = app.Services.GetRequiredService<AccountRegistry>();
+        }
+        catch (Exception ex)
+        {
+            logger.LogCritical("Invalid account configuration: {Message}", ex.Message);
+            return 1;
+        }
+
+        if (registry.Accounts.Count == 0)
+            logger.LogWarning("No accounts are configured; tools will report an error until one is added.");
+        else
+            logger.LogInformation("Serving {Count} account(s): {Accounts}", registry.Accounts.Count,
+                string.Join(", ", registry.Accounts.Select(a => $"{a.Name} ({a.ProviderType})")));
+
+        app.UseMiddleware<ApiKeyMiddleware>(options.ApiKey);
+        app.MapGet(ApiKeyMiddleware.HealthPath, () => Results.Ok(new { status = "ok" }));
+        app.MapMcp("/mcp");
+
+        await app.RunAsync();
+        return 0;
+    }
+
+    default:
+        Console.Error.WriteLine($"Unknown command '{command}'. Usage: McpMailGuard [login [account]]");
+        return 2;
+}

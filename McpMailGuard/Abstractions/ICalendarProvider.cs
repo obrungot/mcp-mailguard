@@ -6,37 +6,42 @@ using McpMailGuard.Models;
 namespace McpMailGuard.Abstractions;
 
 /// <summary>
-/// Abstraction over a calendar data source (Outlook/Microsoft Graph, Google Calendar, ...).
-/// Implementations are interchangeable and can be selected at runtime via configuration.
+/// Read-only access to one account's calendar (Microsoft Graph, later Google Calendar, ...).
 /// </summary>
+/// <remarks>
+/// Time windows are inclusive of events that overlap them, recurring events are expanded into their
+/// individual occurrences, and all times are returned in UTC.
+/// </remarks>
 public interface ICalendarProvider
 {
     /// <summary>
-    /// Human-readable provider name used for diagnostics and logging.
+    /// Human-readable provider name used for diagnostics.
     /// </summary>
     string ProviderName { get; }
 
     /// <summary>
-    /// Returns a list of calendar events from a specific calendar, ordered by start time.
+    /// Returns events overlapping the window, ordered by start time.
     /// </summary>
     Task<IReadOnlyList<CalendarEvent>> ListEventsAsync(
-        string calendarId = "calendar",
-        int maxResults = 20,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        int maxResults,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns a single calendar event by its provider-specific id.
-    /// </summary>
-    Task<CalendarEvent?> GetEventAsync(
-        string id,
-        string calendarId = "calendar",
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Searches events across calendars.
+    /// Returns events in the window whose title, location, organizer or description contains the query.
     /// </summary>
     Task<IReadOnlyList<CalendarEvent>> SearchAsync(
         string query,
-        int maxResults = 20,
+        DateTimeOffset start,
+        DateTimeOffset end,
+        int maxResults,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a single event, including its description, or null if it does not exist.
+    /// </summary>
+    Task<CalendarEvent?> GetEventAsync(
+        string id,
         CancellationToken cancellationToken = default);
 }

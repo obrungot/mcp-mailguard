@@ -6,37 +6,42 @@ using McpMailGuard.Models;
 namespace McpMailGuard.Abstractions;
 
 /// <summary>
-/// Abstraction over an email data source (Outlook/Microsoft Graph, Gmail, IMAP, ...).
-/// Implementations are interchangeable and can be selected at runtime via configuration.
+/// Read-only access to one account's mail (Microsoft Graph, later Gmail, ...).
 /// </summary>
+/// <remarks>
+/// Folder arguments use the provider-neutral aliases in <see cref="MailFolders"/>; each provider maps
+/// them to its own names (Graph well-known folders, Gmail labels). <c>null</c> means all mail.
+/// List and search results carry a short <see cref="EmailMessage.Preview"/> instead of the body;
+/// <see cref="GetMessageAsync"/> returns the plain-text body.
+/// </remarks>
 public interface IEmailProvider
 {
     /// <summary>
-    /// Human-readable provider name used for diagnostics and logging.
+    /// Human-readable provider name used for diagnostics.
     /// </summary>
     string ProviderName { get; }
 
     /// <summary>
-    /// Returns the list of messages in the inbox (most recent first), optionally filtered.
+    /// Returns the most recent messages in a folder, newest first.
     /// </summary>
     Task<IReadOnlyList<EmailMessage>> ListMessagesAsync(
-        int maxResults = 20,
-        string? folder = null,
-        string? searchQuery = null,
+        string? folder,
+        int maxResults,
         CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Returns a single message by its provider-specific id.
-    /// </summary>
-    Task<EmailMessage?> GetMessageAsync(
-        string id,
-        CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Searches messages across the account.
+    /// Full-text search, optionally limited to a folder.
     /// </summary>
     Task<IReadOnlyList<EmailMessage>> SearchAsync(
         string query,
-        int maxResults = 20,
+        string? folder,
+        int maxResults,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Returns a single message, including its plain-text body, or null if it does not exist.
+    /// </summary>
+    Task<EmailMessage?> GetMessageAsync(
+        string id,
         CancellationToken cancellationToken = default);
 }
