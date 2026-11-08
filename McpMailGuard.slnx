@@ -1,4 +1,9 @@
 <Solution>
-  <Project Path="McpMailGuard/McpMailGuard.csproj" />
+  <Folder Name="/Solution Items/">
+    <File Path=".env.example" />
+    <File Path="docker-compose.yml" />
+    <File Path="Dockerfile" />
+  </Folder>
   <Project Path="McpMailGuard.Tests/McpMailGuard.Tests.csproj" />
+  <Project Path="McpMailGuard/McpMailGuard.csproj" />
 </Solution>
