@@ -3,8 +3,8 @@
 # Docker network; no port is published on the host.
 #
 # One-time setup:
-#   docker network create openclaw          # or reuse the network OpenClaw's compose already creates
-#   cp .env.example .env                    # fill in the account and API key
+#   cp .env.example .env                    # fill in the account, API key and OPENCLAW_NETWORK
+#                                           # (e.g. openclaw_default, see `docker network ls`)
 #   docker compose build
 #   docker compose run --rm mailguard login hotmail
 #   docker compose up -d

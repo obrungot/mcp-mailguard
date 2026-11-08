@@ -61,33 +61,38 @@ No client secret is needed.
 ### 2. Configure
 
 ```bash
-git clone <this repo> mcp-mailguard && cd mcp-mailguard
+git clone https://github.com/obrungot/mcp-mailguard.git && cd mcp-mailguard
 cp .env.example .env
 openssl rand -base64 32        # use the output as MailGuard__ApiKey
 nano .env                      # set MailGuard__ApiKey and Accounts__hotmail__ClientId
 ```
 
-### 3. Share a Docker network with OpenClaw
+Write values without quotes and without spaces around `=` (`MailGuard__ApiKey=abc...=`).
+Plain `docker run --env-file` keeps quotes as part of the value, and the key then won't match.
 
-The server publishes no port on the host. OpenClaw reaches it by container name on a shared network.
+### 3. Join OpenClaw's Docker network
+
+The server publishes no port on the host. OpenClaw reaches it as `mailguard` on a Docker network
+the two containers share. Docker's DNS resolves the container name.
+
+The easiest way is to join the network OpenClaw's compose project already has. Find its name:
 
 ```bash
-docker network create openclaw
+docker network ls          # e.g. "openclaw_default" for a compose project named "openclaw"
 ```
 
-Then attach OpenClaw's service to that network in OpenClaw's own `docker-compose.yml`:
+and put it in `.env`:
 
-```yaml
-services:
-  openclaw:            # your existing OpenClaw service
-    networks: [default, openclaw]
-networks:
-  openclaw:
-    external: true
+```
+OPENCLAW_NETWORK=openclaw_default
 ```
 
-If OpenClaw's compose project already creates a network you'd rather reuse, set `OPENCLAW_NETWORK`
-in `.env` to its name instead (see `docker network ls`).
+OpenClaw's own setup doesn't change. If you later run `docker compose down` for OpenClaw, its
+network is recreated. In that case run `docker compose up -d --force-recreate` here so mailguard
+joins the new one.
+
+Alternatively, run `docker network create openclaw` (the default name) and add that network as
+`external: true` to both OpenClaw's service and this one.
 
 ### 4. Build, sign in once, start
 
@@ -102,26 +107,70 @@ sign in with your Hotmail account. The sign-in is saved in the `mailguard-data` 
 refreshes it silently from then on. Run `login` again if Microsoft ever revokes it (for example after
 a password change); a running server picks up the new sign-in without a restart.
 
+`docker compose down -v` deletes the volume and with it the sign-in.
+
 ### 5. Connect OpenClaw
 
-Add the server to OpenClaw's config (see [OpenClaw MCP docs](https://docs.openclaw.ai/tools/mcp)):
+OpenClaw doesn't find the server on its own. Until it's configured, every request except `/health`
+gets `401`. Add it to OpenClaw's config yourself rather than pasting the API key into the bot's
+chat, where it would end up in the chat history.
 
-```json
-{
-  "mcp": {
-    "servers": {
-      "mailguard": {
-        "url": "http://mailguard:8080/mcp",
-        "transport": "streamable-http",
-        "headers": { "Authorization": "Bearer <your MailGuard__ApiKey>" }
-      }
-    }
-  }
-}
+1. Find OpenClaw's config folder on the host (usually `~/.openclaw`):
+
+   ```bash
+   docker inspect <openclaw container> --format '{{range .Mounts}}{{.Source}}{{println}}{{end}}'
+   ```
+
+2. Add this to `openclaw.json` in that folder (see [OpenClaw MCP docs](https://docs.openclaw.ai/tools/mcp)),
+   with the key from `.env`:
+
+   ```json
+   {
+     "mcp": {
+       "servers": {
+         "mailguard": {
+           "url": "http://mailguard:8080/mcp",
+           "transport": "streamable-http",
+           "headers": { "Authorization": "Bearer <your MailGuard__ApiKey>" }
+         }
+       }
+     }
+   }
+   ```
+
+3. Restart OpenClaw (`docker restart <openclaw container>`).
+
+Then ask OpenClaw something like "what are my three latest emails?". OpenClaw's own MCP commands
+(`openclaw mcp ...`, run inside its container) can list the server's tools as well.
+
+### 6. Test the connection (optional)
+
+Run these on the host, in the repo folder. Replace `openclaw_default` with your network name.
+
+```bash
+# Reachable on the shared network?
+docker run --rm --network openclaw_default curlimages/curl -s http://mailguard:8080/health
+
+# Reachable from inside the OpenClaw container (Node image, so use fetch)?
+docker exec <openclaw container> node -e "fetch('http://mailguard:8080/health').then(r=>console.log(r.status))"
 ```
 
-Check the connection with `openclaw mcp doctor mailguard --probe`, then ask OpenClaw something like
-"what's on my calendar this week?".
+A real MCP call with the key:
+
+```bash
+KEY=$(grep '^MailGuard__ApiKey=' .env | cut -d= -f2-)
+mcp() { docker run --rm --network openclaw_default curlimages/curl -s -i http://mailguard:8080/mcp \
+  -H "Authorization: Bearer $KEY" -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' "$@"; }
+
+# 1. Start a session and copy the mcp-session-id response header.
+mcp -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1"}}}'
+SID=<paste the mcp-session-id>
+
+# 2. Finish the handshake and call a tool.
+mcp -H "Mcp-Session-Id: $SID" -d '{"jsonrpc":"2.0","method":"notifications/initialized"}'
+mcp -H "Mcp-Session-Id: $SID" -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"get_recent_emails","arguments":{"maxResults":3}}}'
+```
 
 ## Configuration
 
@@ -172,8 +221,9 @@ Try the tools with the MCP Inspector (`npx @modelcontextprotocol/inspector`), us
 | `AADSTS700016` (application not found) | Wrong ClientId, or TenantId doesn't match the app's account type. Personal-only apps use `consumers`. |
 | `AADSTS9002346` | The app is personal-accounts-only; set TenantId to `consumers`. |
 | `AADSTS7000218` / public client error | Enable **Allow public client flows** on the app registration. |
-| OpenClaw gets 401 | The `Authorization` header doesn't match `MailGuard__ApiKey`. |
-| OpenClaw can't resolve `mailguard` | Both containers must be on the same Docker network. |
+| OpenClaw gets 401 | mailguard isn't in OpenClaw's config yet, or the `Authorization` header doesn't match `MailGuard__ApiKey` (check for quotes or spaces in `.env`). |
+| OpenClaw can't resolve `mailguard` | Both containers must be on the same Docker network: check `OPENCLAW_NETWORK`, then `docker compose up -d --force-recreate`. |
+| Worked before, now unreachable after OpenClaw was restarted with `down` | OpenClaw's network was recreated. Run `docker compose up -d --force-recreate`. |
 | Server exits with "ApiKey is not set" | Set `MailGuard__ApiKey` in `.env`. |
 
 ## Adding a provider (e.g. Gmail)
